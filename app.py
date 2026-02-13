@@ -213,7 +213,7 @@ function esc(s) { return (s || '').replaceAll('&','&amp;').replaceAll('<','&lt;'
 function renderMain(text) { mainCode.textContent = text || 'Noch keine Config geladen. Bitte Fetch ausführen.'; }
 
 function buildIndex(text) {
-  const lines = (text || '').split('\n');
+  const lines = (text || '').split('\\n');
   const items = [];
   let pos = 0;
   for (let i = 0; i < lines.length; i++) {
@@ -243,14 +243,14 @@ function buildIndex(text) {
 function runSearch() {
   const q = qEl.value.trim();
   if (!q) { renderMain(CONFIG_TEXT); hitsEl.textContent = '0 Treffer'; return; }
-  const lines = (CONFIG_TEXT || '').split('\n');
+  const lines = (CONFIG_TEXT || '').split('\\n');
   let hits = 0;
   const marked = lines.map((line) => {
     const i = line.toLowerCase().indexOf(q.toLowerCase());
     if (i < 0) return esc(line);
     hits += 1;
     return esc(line.slice(0, i)) + '<mark>' + esc(line.slice(i, i + q.length)) + '</mark>' + esc(line.slice(i + q.length));
-  }).join('\n');
+  }).join('\\n');
   mainCode.innerHTML = marked;
   hitsEl.textContent = `${hits} Treffer`;
 }
@@ -272,8 +272,8 @@ function setupVersions() {
 }
 
 function renderSideBySideDiff(leftText, rightText) {
-  const left = (leftText || '').split('\n');
-  const right = (rightText || '').split('\n');
+  const left = (leftText || '').split('\\n');
+  const right = (rightText || '').split('\\n');
   const max = Math.max(left.length, right.length);
   const lOut = []; const rOut = [];
   for (let i = 0; i < max; i++) {
@@ -282,8 +282,8 @@ function renderSideBySideDiff(leftText, rightText) {
     lOut.push(changed ? `<span class="line-del">${esc(l)}</span>` : esc(l));
     rOut.push(changed ? `<span class="line-add">${esc(r)}</span>` : esc(r));
   }
-  leftDiff.innerHTML = lOut.join('\n');
-  rightDiff.innerHTML = rOut.join('\n');
+  leftDiff.innerHTML = lOut.join('\\n');
+  rightDiff.innerHTML = rOut.join('\\n');
 }
 
 async function compareVersions() {
