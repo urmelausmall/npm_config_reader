@@ -27,6 +27,76 @@ PREV = {
     "ts": None,
 }
 
+import re
+
+AUTH_STRONG_PATTERNS = [
+    (re.compile(r"outpost\.goauthentik\.io", re.I), "outpost.goauthentik.io"),
+    (re.compile(r"goauthentik", re.I), "goauthentik"),
+    (re.compile(r"\bproxy_set_header\s+X-authentik-", re.I), "X-authentik-* header"),
+]
+
+AUTH_WEAK_PATTERNS = [
+    (re.compile(r"\bauth_request\b", re.I), "auth_request (generic)"),
+]
+
+PROXY_FILE_RE = re.compile(r"^# configuration file\s+(/data/nginx/proxy_host/(\d+)\.conf):", re.M)
+
+def parse_proxy_hosts_authentik(nginx_T_text: str):
+    """
+    Parses `nginx -T` output and returns per proxy_host/*.conf:
+    - id
+    - path
+    - server_names
+    - uses_authentik (bool)
+    - indicators (list[str])
+    """
+    text = nginx_T_text or ""
+    matches = list(PROXY_FILE_RE.finditer(text))
+    results = []
+
+    for idx, m in enumerate(matches):
+        path = m.group(1)
+        host_id = m.group(2)
+        start = m.end()
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(text)
+        block = text[start:end]
+
+        # server_name(s) innerhalb dieser conf
+        server_names = []
+        for sm in re.finditer(r"^\s*server_name\s+([^;]+);", block, re.M):
+            # kann mehrere Namen enthalten
+            names = [x.strip() for x in sm.group(1).split() if x.strip()]
+            server_names.extend(names)
+        server_names = sorted(set(server_names))
+
+        strong = []
+        weak = []
+
+        for rx, label in AUTH_STRONG_PATTERNS:
+            if rx.search(block):
+                strong.append(label)
+
+        for rx, label in AUTH_WEAK_PATTERNS:
+            if rx.search(block):
+                weak.append(label)
+
+        uses_authentik = len(strong) > 0
+        indicators = strong + weak
+
+
+        results.append({
+            "id": host_id,
+            "path": path,
+            "server_names": server_names,
+            "uses_authentik": uses_authentik,
+            "indicators": indicators,
+            "strong": strong,
+            "weak": weak,
+        })
+
+    # Sort: unsichere zuerst (damit du sie direkt siehst), dann nach ID
+    results.sort(key=lambda r: (r["uses_authentik"], int(r["id"])))
+    return results
 
 def _check_basic_auth(request: Request):
     if not (BASIC_USER and BASIC_PASS):
@@ -382,6 +452,7 @@ def index(request: Request):
       </form>
       <a class="btn secondary" href="/download">Download TXT</a>
       <a class="btn secondary" href="/raw" target="_blank">Raw</a>
+      <a class="btn secondary" href="/authentik">Authentik Report</a>
       <button class="ghost" id="btn-diff" title="Diff gegen letzten Fetch (Browser-local)">Diff</button>
       <button class="ghost" id="btn-reset" title="LocalStorage (Diff/Snapshots) löschen">Reset</button>
     </div>
@@ -975,3 +1046,162 @@ def download(request: Request):
         media_type="text/plain; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'}
     )
+
+@app.get("/authentik", response_class=HTMLResponse)
+def authentik_report(request: Request):
+    _check_basic_auth(request)
+
+    if not CACHE["text"]:
+        return HTMLResponse(
+            "<h3>Keine Config im Cache</h3><p>Bitte erst <b>Fetch nginx -T</b> klicken.</p>",
+            status_code=400,
+        )
+
+    rows = parse_proxy_hosts_authentik(CACHE["text"])
+    secured = [r for r in rows if r["uses_authentik"]]
+    open_ = [r for r in rows if not r["uses_authentik"]]
+
+    def fmt_row(r):
+      names = ", ".join(r["server_names"]) if r["server_names"] else "(kein server_name gefunden)"
+
+      strong = r.get("strong", []) or []
+      weak = r.get("weak", []) or []
+
+      if strong:
+          strong_txt = "✅ " + ", ".join(strong)
+      else:
+          strong_txt = "—"
+
+      if weak:
+          weak_txt = "⚠️ " + ", ".join(weak)
+      else:
+          weak_txt = "—"
+
+      badge = "✅" if r["uses_authentik"] else "⚠️"
+
+      return f"""
+        <tr class="{'ok' if r['uses_authentik'] else 'warn'}">
+          <td>{badge}</td>
+          <td>{html.escape(r['id'])}</td>
+          <td><code>{html.escape(r['path'])}</code></td>
+          <td>{html.escape(names)}</td>
+          <td>
+            <div style="display:flex; flex-direction:column; gap:6px;">
+              <div><b>Authentik:</b> {html.escape(strong_txt)}</div>
+              <div><b>Hinweise:</b> {html.escape(weak_txt)}</div>
+            </div>
+          </td>
+        </tr>
+      """
+
+
+    page = f"""<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Authentik Report</title>
+  <style>
+    body {{
+      margin: 0; padding: 16px;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      background: #0b0f14; color: #e6edf3;
+    }}
+    a {{ color: #1f6feb; text-decoration: none; font-weight: 700; }}
+    .top {{
+      display:flex; gap: 12px; align-items: center; flex-wrap: wrap;
+      margin-bottom: 12px;
+    }}
+    .chip {{
+      border: 1px solid #1f2a37;
+      background: #182233;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12.5px;
+      color: rgba(230,237,243,.8);
+    }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border-radius: 12px;
+      border: 1px solid #1f2a37;
+    }}
+    th, td {{
+      padding: 10px 10px;
+      border-bottom: 1px solid #1f2a37;
+      vertical-align: top;
+      font-size: 13px;
+    }}
+    th {{
+      text-align: left;
+      background: #0d121a;
+      position: sticky; top: 0;
+      z-index: 1;
+    }}
+    tr.ok {{ background: rgba(46,160,67,.06); }}
+    tr.warn {{ background: rgba(210,153,34,.06); }}
+    code {{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      color: rgba(230,237,243,.9);
+    }}
+    .section {{
+      margin-top: 16px;
+      border: 1px solid #1f2a37;
+      border-radius: 14px;
+      overflow: hidden;
+    }}
+    .section h3 {{
+      margin:0;
+      padding: 10px 12px;
+      background: #0d121a;
+      border-bottom: 1px solid #1f2a37;
+      font-size: 14px;
+    }}
+    .section .body {{ padding: 10px 12px; }}
+  </style>
+</head>
+<body>
+  <div class="top">
+    <a href="/">← zurück</a>
+    <span class="chip">Proxy Hosts gefunden: <b>{len(rows)}</b></span>
+    <span class="chip">Mit Authentik: <b>{len(secured)}</b></span>
+    <span class="chip">Ohne Authentik: <b>{len(open_)}</b></span>
+  </div>
+
+  <div class="section">
+    <h3>⚠️ Ohne Authentik (prüfen/absichern)</h3>
+    <div class="body">
+      <table>
+        <thead>
+          <tr>
+            <th></th><th>ID</th><th>Datei</th><th>server_name(s)</th><th>Erkannt durch</th>
+          </tr>
+        </thead>
+        <tbody>
+          {''.join(fmt_row(r) for r in open_) if open_ else '<tr class="ok"><td colspan="5">Alles abgesichert ✅</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>✅ Mit Authentik</h3>
+    <div class="body">
+      <table>
+        <thead>
+          <tr>
+            <th></th><th>ID</th><th>Datei</th><th>server_name(s)</th><th>Erkannt durch</th>
+          </tr>
+        </thead>
+        <tbody>
+          {''.join(fmt_row(r) for r in secured) if secured else '<tr class="warn"><td colspan="5">Kein Host nutzt Authentik (laut Erkennung).</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</body>
+</html>
+"""
+    return HTMLResponse(page)

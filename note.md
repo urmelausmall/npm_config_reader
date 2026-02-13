@@ -5,6 +5,6 @@ docker buildx create --use
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
   -t urmelausmall/npm_config_reader:latest \
-  -t urmelausmall/npm_config_reader:0.1 \
+  -t urmelausmall/npm_config_reader:0.95 \
   --push \
   .
