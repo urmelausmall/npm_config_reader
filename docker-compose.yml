@@ -1,0 +1,16 @@
+services:
+  npm-config-reader:
+    image: urmelausmall/npm_config_reader:latest
+    container_name: npm-config-reader
+    environment:
+      - TZ=Europe/Berlin
+      - NPMPLUS_CONTAINER=npmplus
+      # Optional BasicAuth:
+      - BASIC_AUTH_USER=andre
+      - BASIC_AUTH_PASS=supersecret
+      # Optional: max output size safeguard (chars)
+      - MAX_CHARS=4000000
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "8099:8000"
