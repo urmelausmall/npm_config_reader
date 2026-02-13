@@ -219,7 +219,7 @@ function buildIndex(text) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (line.startsWith('# configuration file ')) items.push({label: line.replace('# configuration file ',''), pos: pos});
-    if (/^\s*server\s*\{/.test(line)) items.push({label: `server block (Zeile ${i+1})`, pos: pos});
+    if (/^\\s*server\\s*\\{/.test(line)) items.push({label: `server block (Zeile ${i+1})`, pos: pos});
     pos += line.length + 1;
   }
   idxEl.innerHTML = '';
